@@ -158,8 +158,8 @@ def init():
 
 
 def open_browser():
-    host    = 'localhost'
-    app_url = f'http://{host}:{APP_PORT}'
+    host    = os.getenv("PUBLIC_HOST", "138.252.201.204")
+    app_url = f'http://{host}'
     shared_obj.logger_global.info(f"{lg}Running on {ye}{app_url}{n}")
 
     try:
@@ -170,11 +170,11 @@ def open_browser():
                 f"{lg}NGROK tunnel URL: {ye}{shared_obj.public_url}{n}"
             )
         else:
-            shared_obj.public_url = f'http://{host}:{APP_PORT}'
+            shared_obj.public_url = app_url
             shared_obj.logger_global.warning(f'{ye}NGROK_ENABLED = False{n}')
     except Exception as err:
         shared_obj.logger_global.warning(f'{ye}NGROK setup failed: {err}{n}')
-        shared_obj.public_url = f'http://{host}:{APP_PORT}'
+        shared_obj.public_url = app_url
 
 
 def main():
