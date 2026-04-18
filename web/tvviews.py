@@ -1,7 +1,9 @@
 import json
 import gevent.hub
+import datetime
 
 from flask import Blueprint, request, jsonify
+from flask_login import current_user, login_required
 
 from utils.shared import shared_obj, lg, cy, ye, r, n
 from utils.mt5_manager import mt5_manager
@@ -9,6 +11,23 @@ from . import db
 from .models import User, TradingviewTrigger, Trade
 
 tvviews = Blueprint('tvviews', __name__)
+
+_start_time = datetime.datetime.now()
+
+
+@tvviews.route('/health', methods=['GET'])
+def health():
+    from .models import Trade
+    uptime_seconds = int((datetime.datetime.now() - _start_time).total_seconds())
+    hours, rem     = divmod(uptime_seconds, 3600)
+    minutes, secs  = divmod(rem, 60)
+    total_trades   = Trade.query.count()
+    return jsonify({
+        "status":       "ok",
+        "uptime":       f"{hours}h {minutes}m {secs}s",
+        "total_trades": total_trades,
+        "timestamp":    datetime.datetime.now().isoformat(),
+    }), 200
 
 
 @tvviews.route('/tvwebhook', methods=['GET', 'POST'])

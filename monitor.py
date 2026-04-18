@@ -1,27 +1,33 @@
 """
-Supertrend Algo — AI-Powered Health Monitor (Gemini)
-Runs every 5 minutes via Task Scheduler.
-Checks port 80, task state, and app logs.
-Unknown errors are diagnosed by Gemini, which generates and applies fixes.
+Supertrend Algo — Production Health Monitor
+- Runs every 1 minute via Task Scheduler
+- 3-attempt restart with backoff
+- Email alerts on down/recovery
+- Gemini AI diagnosis for unknown errors
+- Watchdog checks monitor is alive
 """
 import subprocess
 import os
-import sys
 import datetime
 import socket
 import time
-import traceback
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=r"C:\supertrend-algo\.env")
 
-LOG_FILE  = r"C:\supertrend-algo\logs\monitor.log"
-APP_DIR   = r"C:\supertrend-algo"
-TASK_NAME = "SupertrendAlgo"
-PORT      = 80
-PYTHON    = r"C:\Program Files\Python311\python.exe"
+LOG_FILE      = r"C:\supertrend-algo\logs\monitor.log"
+STATE_FILE    = r"C:\supertrend-algo\logs\monitor_state.txt"
+APP_DIR       = r"C:\supertrend-algo"
+TASK_NAME     = "SupertrendAlgo"
+PORT          = 80
+PYTHON        = r"C:\Program Files\Python311\python.exe"
+ALERT_EMAIL   = os.getenv("ALERT_EMAIL", "adnovationllp@gmail.com")
+GMAIL_USER    = os.getenv("GMAIL_USER", "")
+GMAIL_PASS    = os.getenv("GMAIL_APP_PASS", "")
 
-# Known-fixable error signatures (handled locally, no AI needed)
 KNOWN_ERRORS = [
     "database is locked",
     "address already in use",
@@ -32,6 +38,8 @@ KNOWN_ERRORS = [
 ]
 
 
+# ── Logging ───────────────────────────────────────────────────────────────────
+
 def log(msg, level="INFO"):
     ts   = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] [{level}] {msg}"
@@ -40,6 +48,83 @@ def log(msg, level="INFO"):
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
+
+def rotate_log():
+    if os.path.isfile(LOG_FILE) and os.path.getsize(LOG_FILE) > 5 * 1024 * 1024:
+        rotated = LOG_FILE.replace(".log", "_old.log")
+        if os.path.isfile(rotated):
+            os.remove(rotated)
+        os.rename(LOG_FILE, rotated)
+
+
+# ── State tracking (was app up last check?) ───────────────────────────────────
+
+def get_last_state():
+    if os.path.isfile(STATE_FILE):
+        with open(STATE_FILE) as f:
+            return f.read().strip()
+    return "unknown"
+
+
+def set_state(state):
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        f.write(state)
+
+
+# ── Email alerts ──────────────────────────────────────────────────────────────
+
+def send_email(subject, body):
+    if not GMAIL_USER or not GMAIL_PASS:
+        log("Email not configured — skipping alert", "WARN")
+        return
+    try:
+        msg                    = MIMEMultipart()
+        msg["From"]            = GMAIL_USER
+        msg["To"]              = ALERT_EMAIL
+        msg["Subject"]         = subject
+        msg.attach(MIMEText(body, "plain"))
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as s:
+            s.starttls()
+            s.login(GMAIL_USER, GMAIL_PASS)
+            s.sendmail(GMAIL_USER, ALERT_EMAIL, msg.as_string())
+        log(f"Email alert sent: {subject}", "ALERT")
+    except Exception as e:
+        log(f"Email send failed: {e}", "ERROR")
+
+
+def alert_down(reason):
+    last = get_last_state()
+    if last != "down":
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        send_email(
+            subject="[ALERT] Supertrend Algo is DOWN",
+            body=(
+                f"Your trading bot went offline at {ts}.\n\n"
+                f"Reason: {reason}\n\n"
+                f"The monitor is attempting automatic recovery.\n"
+                f"Check logs at: C:\\supertrend-algo\\logs\\monitor.log"
+            )
+        )
+    set_state("down")
+
+
+def alert_recovered():
+    last = get_last_state()
+    if last == "down":
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        send_email(
+            subject="[RECOVERED] Supertrend Algo is back ONLINE",
+            body=(
+                f"Your trading bot recovered successfully at {ts}.\n\n"
+                f"Port 80 is responding normally.\n"
+                f"No action needed."
+            )
+        )
+    set_state("up")
+
+
+# ── Port / task checks ────────────────────────────────────────────────────────
 
 def is_port_listening(port):
     try:
@@ -62,21 +147,36 @@ def get_task_state():
         return "Unknown"
 
 
-def start_task():
-    subprocess.run(
-        ["powershell.exe", "-Command",
-         f"Stop-ScheduledTask -TaskName '{TASK_NAME}' -ErrorAction SilentlyContinue"],
-        capture_output=True, timeout=15
-    )
-    time.sleep(3)
-    subprocess.run(
-        ["powershell.exe", "-Command",
-         f"Start-ScheduledTask -TaskName '{TASK_NAME}'"],
-        capture_output=True, timeout=15
-    )
-    log(f"Issued Start-ScheduledTask for '{TASK_NAME}'", "ACTION")
-    time.sleep(10)
+# ── Restart with 3-attempt backoff ────────────────────────────────────────────
 
+def restart_app(reason=""):
+    log(f"Restart triggered — reason: {reason}", "ACTION")
+    for attempt in range(1, 4):
+        log(f"Restart attempt {attempt}/3...", "ACTION")
+        subprocess.run(
+            ["powershell.exe", "-Command",
+             f"Stop-ScheduledTask -TaskName '{TASK_NAME}' -ErrorAction SilentlyContinue"],
+            capture_output=True, timeout=15
+        )
+        time.sleep(4)
+        subprocess.run(
+            ["powershell.exe", "-Command",
+             f"Start-ScheduledTask -TaskName '{TASK_NAME}'"],
+            capture_output=True, timeout=15
+        )
+        wait = 10 + (attempt - 1) * 5   # 10s, 15s, 20s
+        log(f"Waiting {wait}s for app to come up...", "ACTION")
+        time.sleep(wait)
+        if is_port_listening(PORT):
+            log(f"Recovery SUCCESS on attempt {attempt}", "OK")
+            return True
+        log(f"Attempt {attempt} failed — port still down", "WARN")
+
+    log("All 3 restart attempts failed", "ERROR")
+    return False
+
+
+# ── App log analysis ──────────────────────────────────────────────────────────
 
 def get_recent_app_errors(lines=100):
     app_log = os.path.join(APP_DIR, "logs", "app.log")
@@ -86,176 +186,26 @@ def get_recent_app_errors(lines=100):
         with open(app_log, "r", encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
         recent = all_lines[-lines:]
-        errors = [l.strip() for l in recent
-                  if any(kw in l for kw in ("ERROR", "CRITICAL", "Traceback", "Exception"))]
-        return errors
+        return [l.strip() for l in recent
+                if any(kw in l for kw in ("ERROR", "CRITICAL", "Traceback", "Exception"))]
     except Exception as e:
         log(f"Could not read app.log: {e}", "WARN")
         return []
 
 
-def get_app_source_context():
-    """Collect key source files to give Gemini full context for fixes."""
-    files = {
-        "main.py":          os.path.join(APP_DIR, "main.py"),
-        "web/__init__.py":  os.path.join(APP_DIR, "web", "__init__.py"),
-        "web/models.py":    os.path.join(APP_DIR, "web", "models.py"),
-        "web/tvviews.py":   os.path.join(APP_DIR, "web", "tvviews.py"),
-        "utils/mt5_manager.py": os.path.join(APP_DIR, "utils", "mt5_manager.py"),
-    }
-    context = {}
-    for name, path in files.items():
-        try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                context[name] = f.read()
-        except Exception:
-            pass
-    return context
+# ── Known fixes ───────────────────────────────────────────────────────────────
 
-
-def apply_gemini_fix(fix_instructions: str) -> bool:
-    """
-    Parse and apply fix instructions returned by Gemini.
-    Gemini returns a structured block:
-      FILE: <relative path>
-      FIND: <exact string to find>
-      REPLACE: <replacement string>
-      ---
-    Or a COMMAND block:
-      COMMAND: <powershell command>
-    """
-    applied = False
-    blocks  = fix_instructions.strip().split("---")
-
-    for block in blocks:
-        block = block.strip()
-        if not block:
-            continue
-
-        lines = block.splitlines()
-        kv    = {}
-        for line in lines:
-            if ":" in line:
-                key, _, val = line.partition(":")
-                kv[key.strip().upper()] = val.strip()
-
-        if "COMMAND" in kv:
-            cmd = kv["COMMAND"]
-            log(f"Gemini fix — running command: {cmd}", "FIX")
-            try:
-                result = subprocess.run(
-                    ["powershell.exe", "-Command", cmd],
-                    capture_output=True, text=True, timeout=60
-                )
-                log(f"Command output: {result.stdout.strip()[:300]}", "FIX")
-                applied = True
-            except Exception as e:
-                log(f"Command failed: {e}", "ERROR")
-
-        elif "FILE" in kv and "FIND" in kv and "REPLACE" in kv:
-            rel_path = kv["FILE"].replace("/", os.sep).replace("\\", os.sep)
-            abs_path = os.path.join(APP_DIR, rel_path)
-            find_str    = kv["FIND"].replace("\\n", "\n")
-            replace_str = kv["REPLACE"].replace("\\n", "\n")
-            log(f"Gemini fix — patching {rel_path}", "FIX")
-            try:
-                with open(abs_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                if find_str in content:
-                    new_content = content.replace(find_str, replace_str, 1)
-                    with open(abs_path, "w", encoding="utf-8") as f:
-                        f.write(new_content)
-                    log(f"Patched {rel_path} successfully", "FIX")
-                    applied = True
-                else:
-                    log(f"FIND string not found in {rel_path} — skipping patch", "WARN")
-            except Exception as e:
-                log(f"File patch failed: {e}", "ERROR")
-
-    return applied
-
-
-def ask_gemini(errors: list, source_context: dict) -> str | None:
-    """Send error context to Gemini and get a structured fix back."""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        log("GEMINI_API_KEY not set — skipping AI diagnosis", "WARN")
-        return None
-
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-    except Exception as e:
-        log(f"Gemini init failed: {e}", "ERROR")
-        return None
-
-    error_text   = "\n".join(errors[-30:])
-    source_dumps = "\n\n".join(
-        f"=== {name} ===\n{code[:3000]}" for name, code in source_context.items()
-    )
-
-    prompt = f"""You are an expert Python/Flask developer and DevOps engineer.
-The following Flask application is running on a Windows Server VPS and has crashed or logged errors.
-
-PROJECT: Supertrend Algo — TradingView to MetaTrader5 bridge
-LOCATION: C:\\supertrend-algo
-PYTHON: C:\\Program Files\\Python311\\python.exe
-PORT: 8501
-
-=== RECENT ERRORS FROM app.log ===
-{error_text}
-
-=== SOURCE CODE CONTEXT ===
-{source_dumps}
-
-Your job: diagnose the root cause and provide SPECIFIC fix instructions.
-
-RESPONSE FORMAT (use exactly this format, one block per fix, separated by ---):
-
-For a file patch:
-FILE: <relative path like web/models.py>
-FIND: <exact string in the file to replace>
-REPLACE: <replacement string>
----
-
-For a shell command:
-COMMAND: <powershell or python command to run>
----
-
-Rules:
-- Only output fix blocks, no explanation text outside the blocks
-- Only suggest fixes you are confident about
-- If no fix is possible, output: NO_FIX
-- Keep FIND strings short and unique enough to match exactly once
-- Use \\n for newlines inside FIND/REPLACE values
-"""
-
-    try:
-        log("Sending error to Gemini for diagnosis...", "AI")
-        response = model.generate_content(prompt)
-        reply    = response.text.strip()
-        log(f"Gemini response ({len(reply)} chars):\n{reply[:600]}", "AI")
-        return reply
-    except Exception as e:
-        log(f"Gemini API call failed: {e}", "ERROR")
-        return None
-
-
-def apply_known_fix(error_text: str) -> bool:
-    """Fast local fixes for well-known errors — no AI needed."""
-
+def apply_known_fix(error_text):
     if "database is locked" in error_text.lower():
         log("Known fix: SQLite lock — removing WAL files", "FIX")
         for ext in ["-wal", "-shm"]:
             f = os.path.join(APP_DIR, "instance", "database.db" + ext)
             if os.path.isfile(f):
                 os.remove(f)
-                log(f"Removed {f}", "FIX")
         return True
 
     if "address already in use" in error_text.lower() or "10048" in error_text:
-        log("Known fix: port in use — killing stale process on 80", "FIX")
+        log("Known fix: port conflict — killing stale python on port 80", "FIX")
         subprocess.run(
             ["powershell.exe", "-Command",
              f"Get-NetTCPConnection -LocalPort {PORT} -ErrorAction SilentlyContinue | "
@@ -277,48 +227,169 @@ def apply_known_fix(error_text: str) -> bool:
         env_path = os.path.join(APP_DIR, ".env")
         if not os.path.isfile(env_path):
             log("Known fix: .env missing — restoring defaults", "FIX")
+            gemini_key = os.getenv("GEMINI_API_KEY", "")
             with open(env_path, "w") as f:
-                f.write("REGISTER_SECRETKEY=secret@2026\nSUPERUSER_USERNAME=admin\n"
-                        "SUPERUSER_NAME=Admin\nSUPERUSER_PASSWORD=admin\nNGROK_ENABLED=n\n"
-                        f"GEMINI_API_KEY={os.getenv('GEMINI_API_KEY','')}\n")
+                f.write(f"REGISTER_SECRETKEY=secret@2026\nSUPERUSER_USERNAME=admin\n"
+                        f"SUPERUSER_NAME=Admin\nSUPERUSER_PASSWORD=admin\n"
+                        f"NGROK_ENABLED=n\nGEMINI_API_KEY={gemini_key}\n"
+                        f"ALERT_EMAIL={ALERT_EMAIL}\n")
             return True
 
     return False
 
 
-def rotate_log():
-    if os.path.isfile(LOG_FILE) and os.path.getsize(LOG_FILE) > 5 * 1024 * 1024:
-        rotated = LOG_FILE.replace(".log", "_old.log")
-        if os.path.isfile(rotated):
-            os.remove(rotated)
-        os.rename(LOG_FILE, rotated)
-        log("Monitor log rotated", "INFO")
+# ── Gemini AI diagnosis ───────────────────────────────────────────────────────
 
+def get_app_source_context():
+    files = {
+        "main.py":              os.path.join(APP_DIR, "main.py"),
+        "web/__init__.py":      os.path.join(APP_DIR, "web", "__init__.py"),
+        "web/models.py":        os.path.join(APP_DIR, "web", "models.py"),
+        "web/tvviews.py":       os.path.join(APP_DIR, "web", "tvviews.py"),
+        "utils/mt5_manager.py": os.path.join(APP_DIR, "utils", "mt5_manager.py"),
+    }
+    context = {}
+    for name, path in files.items():
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                context[name] = f.read()
+        except Exception:
+            pass
+    return context
+
+
+def apply_gemini_fix(fix_instructions):
+    applied = False
+    blocks  = fix_instructions.strip().split("---")
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        lines = block.splitlines()
+        kv    = {}
+        for line in lines:
+            if ":" in line:
+                key, _, val = line.partition(":")
+                kv[key.strip().upper()] = val.strip()
+
+        if "COMMAND" in kv:
+            cmd = kv["COMMAND"]
+            log(f"Gemini fix — running: {cmd}", "FIX")
+            try:
+                result = subprocess.run(
+                    ["powershell.exe", "-Command", cmd],
+                    capture_output=True, text=True, timeout=60
+                )
+                log(f"Command output: {result.stdout.strip()[:300]}", "FIX")
+                applied = True
+            except Exception as e:
+                log(f"Command failed: {e}", "ERROR")
+
+        elif "FILE" in kv and "FIND" in kv and "REPLACE" in kv:
+            rel_path    = kv["FILE"].replace("/", os.sep)
+            abs_path    = os.path.join(APP_DIR, rel_path)
+            find_str    = kv["FIND"].replace("\\n", "\n")
+            replace_str = kv["REPLACE"].replace("\\n", "\n")
+            try:
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if find_str in content:
+                    with open(abs_path, "w", encoding="utf-8") as f:
+                        f.write(content.replace(find_str, replace_str, 1))
+                    log(f"Patched {rel_path}", "FIX")
+                    applied = True
+                else:
+                    log(f"FIND string not found in {rel_path}", "WARN")
+            except Exception as e:
+                log(f"File patch failed: {e}", "ERROR")
+    return applied
+
+
+def ask_gemini(errors, source_context):
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        log("GEMINI_API_KEY not set — skipping AI diagnosis", "WARN")
+        return None
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+    except Exception as e:
+        log(f"Gemini init failed: {e}", "ERROR")
+        return None
+
+    error_text   = "\n".join(errors[-30:])
+    source_dumps = "\n\n".join(
+        f"=== {name} ===\n{code[:3000]}" for name, code in source_context.items()
+    )
+    prompt = f"""You are an expert Python/Flask developer and DevOps engineer.
+The following Flask app is running on Windows Server VPS and has crashed or logged errors.
+
+PROJECT: Supertrend Algo (TradingView to MetaTrader5 bridge)
+LOCATION: C:\\supertrend-algo
+PYTHON: C:\\Program Files\\Python311\\python.exe
+PORT: 80
+
+=== RECENT ERRORS ===
+{error_text}
+
+=== SOURCE CODE ===
+{source_dumps}
+
+Diagnose and provide fix instructions in this exact format only:
+
+For a file patch:
+FILE: <relative path>
+FIND: <exact string to find>
+REPLACE: <replacement string>
+---
+
+For a shell command:
+COMMAND: <powershell command>
+---
+
+Rules:
+- Output fix blocks only, no explanation text
+- If no fix possible, output: NO_FIX
+- Use \\n for newlines inside FIND/REPLACE
+"""
+    try:
+        log("Sending error to Gemini for AI diagnosis...", "AI")
+        response = model.generate_content(prompt)
+        reply    = response.text.strip()
+        log(f"Gemini response: {reply[:400]}", "AI")
+        return reply
+    except Exception as e:
+        log(f"Gemini API call failed: {e}", "ERROR")
+        return None
+
+
+# ── Main check ────────────────────────────────────────────────────────────────
 
 def run():
     rotate_log()
-    log("=" * 60)
     log("Health check start")
 
     port_ok    = is_port_listening(PORT)
     task_state = get_task_state()
     errors     = get_recent_app_errors()
 
-    log(f"Port {PORT} listening : {port_ok}")
-    log(f"Task state            : {task_state}")
-    log(f"Error lines in log    : {len(errors)}")
+    log(f"Port {PORT}: {'UP' if port_ok else 'DOWN'} | Task: {task_state} | Errors: {len(errors)}")
 
-    for e in errors[-5:]:
+    for e in errors[-3:]:
         log(f"  >> {e}", "WARN")
 
     needs_restart = False
+    failure_reason = ""
 
     if not port_ok:
-        log("ALERT: Port 8501 is DOWN", "ALERT")
+        failure_reason = "Port 80 not responding"
+        log(f"ALERT: {failure_reason}", "ALERT")
         needs_restart = True
 
     if task_state not in ("Running", "Ready"):
-        log(f"ALERT: Task in bad state: {task_state}", "ALERT")
+        failure_reason = f"Task in bad state: {task_state}"
+        log(f"ALERT: {failure_reason}", "ALERT")
         needs_restart = True
 
     if errors:
@@ -328,37 +399,42 @@ def run():
         if is_known:
             fixed = apply_known_fix(error_text)
             if fixed:
-                needs_restart = True
+                needs_restart  = True
+                failure_reason = failure_reason or "Known error auto-fixed"
         else:
-            # Unknown error — ask Gemini
-            log("Unknown error detected — escalating to Gemini AI", "AI")
-            source_ctx = get_app_source_context()
-            fix_reply  = ask_gemini(errors, source_ctx)
-
+            log("Unknown error — escalating to Gemini AI", "AI")
+            fix_reply = ask_gemini(errors, get_app_source_context())
             if fix_reply and fix_reply.strip() != "NO_FIX":
                 applied = apply_gemini_fix(fix_reply)
                 if applied:
-                    needs_restart = True
-                    log("Gemini fix applied — will restart app", "ACTION")
-                else:
-                    log("Gemini returned a fix but it could not be applied", "WARN")
+                    needs_restart  = True
+                    failure_reason = failure_reason or "Gemini AI fix applied"
             else:
                 log("Gemini could not determine a fix — manual review needed", "WARN")
 
     if needs_restart:
-        log("Restarting SupertrendAlgo...", "ACTION")
-        start_task()
-        time.sleep(10)
-        recovered = is_port_listening(PORT)
+        alert_down(failure_reason)
+        recovered = restart_app(failure_reason)
         if recovered:
-            log("Recovery SUCCESSFUL — port 8501 is back up", "OK")
+            alert_recovered()
         else:
-            log("Recovery FAILED — port still not listening after restart", "ERROR")
+            log("CRITICAL: App did not recover after 3 attempts", "ERROR")
+            send_email(
+                subject="[CRITICAL] Supertrend Algo recovery FAILED",
+                body=(
+                    f"Automatic recovery failed after 3 attempts.\n\n"
+                    f"Reason: {failure_reason}\n\n"
+                    f"MANUAL INTERVENTION REQUIRED.\n"
+                    f"RDP into 138.252.201.204 and check:\n"
+                    f"  C:\\supertrend-algo\\logs\\app.log\n"
+                    f"  C:\\supertrend-algo\\logs\\monitor.log"
+                )
+            )
     else:
         log("All checks PASSED — app is healthy", "OK")
+        alert_recovered()
 
-    log("Health check end")
-    log("=" * 60 + "\n")
+    log("Health check end\n")
 
 
 if __name__ == "__main__":
