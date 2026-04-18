@@ -15,8 +15,9 @@ APP_PORT = 80
 
 
 def create_app(load_user_mt5):
+    import os
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-    app.config['SECRET_KEY'] = 'thisisasecretkey'
+    app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'xK9#mP2$vL7@nQ4&')
     async_mode = 'gevent'
     CORS(app, origins="*")
 

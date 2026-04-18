@@ -28,10 +28,7 @@
 				<span class="w-100 d-lg-none d-block"
 					><!-- hidden spacer to center brand on mobile --></span
 				>
-				<a class="navbar-brand" href="#"
-					>{% block navbartitle %}Home{% endblock %}
-					({{user.dhan_api.client_id if user.dhan_api else ''}})</a
-				>
+				<a class="navbar-brand" href="/">{% block navbartitle %}Home{% endblock %}</a>
 				<div class="w-100 text-right">
 					<button
 						class="navbar-toggler"
