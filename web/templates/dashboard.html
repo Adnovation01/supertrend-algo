@@ -1,0 +1,86 @@
+{% block css %}
+<link rel="stylesheet" type="text/css" href="{{url_for('static', filename='dashboard.css')}}" />
+{% endblock %}
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<div class="jumbotron">
+    <form id="webhook-url-form" class="webhook-url-form">
+        <div class="form-row">
+            <div class="form-group col-md-10 row mx-auto">
+                <label for="webhook-url" class="col-sm-3 col-form-label">TradingView Webhook URL</label>
+                <input type="text" id="webhook-url" class="col-sm-8 form-control" value="{{ webhook_url }}" readonly>
+            </div>
+            <div class="form-group col-md-2 row mx-auto">
+                <button type="button" class="btn btn-primary" onclick="copyToClipboard('webhook-url')">Copy URL</button>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group col-md-10 row mx-auto">
+                <label for="message-template" class="col-sm-3 col-form-label">
+                    Alert Message Template
+                    <small class="form-text text-muted">Paste this into your TradingView alert's Message box.</small>
+                </label>
+                <textarea id="message-template" class="col-sm-8 form-control" readonly rows="8">{{ message_template }}</textarea>
+            </div>
+            <div class="form-group col-md-2 row mx-auto">
+                <button type="button" class="btn btn-primary" onclick="copyToClipboard('message-template')">Copy Template</button>
+            </div>
+        </div>
+    </form>
+
+    <hr />
+    <h5>Template Field Guide</h5>
+    <table class="table table-sm table-bordered">
+        <thead class="thead-light">
+            <tr>
+                <th>Field</th>
+                <th>Description</th>
+                <th>Example</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>secret</code></td>
+                <td>Your unique webhook secret (pre-filled above)</td>
+                <td><em>auto-filled</em></td>
+            </tr>
+            <tr>
+                <td><code>ticker</code></td>
+                <td>MT5 symbol exactly as shown in your broker's MT5</td>
+                <td><code>XAUUSD</code>, <code>EURUSD</code>, <code>US30.cash</code></td>
+            </tr>
+            <tr>
+                <td><code>volume</code></td>
+                <td>Lot size to trade (minimum 0.01)</td>
+                <td><code>0.01</code>, <code>0.1</code>, <code>1.0</code></td>
+            </tr>
+            <tr>
+                <td><code>magic</code></td>
+                <td>
+                    Unique integer per strategy. Used to track and close <em>only</em> the
+                    position opened by that strategy. Use a different number for each strategy.
+                </td>
+                <td><code>1001</code>, <code>2002</code></td>
+            </tr>
+            <tr>
+                <td><code>alert_message</code></td>
+                <td>
+                    Signal direction and action. Optionally append an exit reason after a space.
+                </td>
+                <td>
+                    <code>long entry</code>, <code>long exit SL</code>,<br>
+                    <code>short entry</code>, <code>short exit TP</code>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+{% block navbartitle %}Dashboard{% endblock %}
+{% block navbarlinks %}{% endblock %}
+{% block jslinks %}
+<script src="{{url_for('static', filename='dashboard.js')}}"></script>
+{% endblock %}

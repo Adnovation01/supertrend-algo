@@ -1,0 +1,125 @@
+{% block css%}
+<link rel="stylesheet" type="text/css" href="{{url_for('static', filename='profile.css')}}" />
+{% endblock %}
+{% extends "base.html" %}
+{% block title %}Profile{% endblock %}
+{% block navbartitle %}Profile Page{% endblock %}
+{% block navbarlinks %}
+<a class="nav-item nav-link" id="dashboard" href="/">Dashboard</a>
+{% endblock %}
+{% block content%}
+<div class="jumbotron">
+    <h3>Profile</h3>
+    <form id="profile-form" class="profile-form" method="POST" action="">
+        {{ profile_form.csrf_token() }}
+        <div class="form-row">
+            <div class="form-group col-md-6 row">
+                <label for="staticUserName" class="col-sm-3 col-form-label">Username</label>
+                <input type="text" readonly class="form-control col-sm-9" id="staticUserName" value="{{user.username}}" />
+            </div>
+            <div class="form-group col-md-3 row">
+                <label for="staticUserId" class="col-sm-6 col-form-label">ID</label>
+                <input type="text" readonly class="form-control col-sm-5" id="staticUserId" value="{{user.id}}" />
+            </div>
+            <div class="form-group col-md-3 row">
+                <label for="staticRole" class="col-sm-4 col-form-label">Role</label>
+                <input type="text" readonly class="form-control col-sm-8" id="staticRole" value="{{user.role.upper()}}" />
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group col-md-6 row">
+                {{ profile_form.name.label(class="col-sm-3 col-form-label") }}
+                {{ profile_form.name(value=user.name, class="form-control col-sm-9") }}
+            </div>
+            <div class="form-group col-md-6 row">
+                {{ profile_form.email.label(class="col-sm-3 col-form-label") }}
+                {{ profile_form.email(value=user.email if user.email else '', class="form-control col-sm-9") }}
+            </div>
+        </div>
+        {{ profile_form.submit(class="btn btn-primary col-sm-4", id="profile-submit") }}
+    </form>
+
+    <br />
+    <hr />
+
+    <h3>
+        <span style="float: left;">MT5 Account</span>
+        {% if user.mt5_account %}
+            {% if user.mt5_account.status == 'connected' %}
+                <span class="badge badge-success align-bottom ml-2">CONNECTED</span>
+            {% else %}
+                <span class="badge badge-danger align-bottom ml-2">DISCONNECTED</span>
+                <span style="float: right;">
+                    <form action="{{ url_for('views.mt5_reconnect') }}" method="GET">
+                        <button class="btn btn-primary" type="submit" id="mt5-reconnect-btn">Reconnect</button>
+                    </form>
+                </span>
+            {% endif %}
+        {% endif %}
+    </h3>
+    {% if user.mt5_account and user.mt5_account.status == 'connected' %}
+    <p class="text-muted">
+        Broker: <strong>{{ user.mt5_account.broker }}</strong> &nbsp;|&nbsp;
+        Server: <strong>{{ user.mt5_account.server }}</strong> &nbsp;|&nbsp;
+        Account: <strong>{{ user.mt5_account.login }}</strong>
+    </p>
+    {% endif %}
+    <br />
+
+    <form id="mt5-api-form" method="POST" action="">
+        {{ mt5_form.hidden_tag() }}
+
+        <div class="form-row">
+            <div class="form-group col-md-6 row">
+                {{ mt5_form.login.label(class="col-sm-5 col-form-label") }}
+                {{ mt5_form.login(value=user.mt5_account.login if user.mt5_account else '',
+                   class="form-control col-sm-7", placeholder="e.g. 12345678") }}
+            </div>
+            <div class="form-group col-md-6 row">
+                {{ mt5_form.broker.label(class="col-sm-5 col-form-label") }}
+                {{ mt5_form.broker(value=user.mt5_account.broker if user.mt5_account else '',
+                   class="form-control col-sm-7", placeholder="e.g. Exness") }}
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group col-md-6 row">
+                {{ mt5_form.server.label(class="col-sm-5 col-form-label") }}
+                {{ mt5_form.server(value=user.mt5_account.server if user.mt5_account else '',
+                   class="form-control col-sm-7", placeholder="e.g. Exness-MT5Real8") }}
+            </div>
+            <div class="form-group col-md-6 row">
+                {{ mt5_form.password.label(class="col-sm-5 col-form-label") }}
+                <div class="input-group col-sm-7">
+                    {{ mt5_form.password(class="form-control", id="mt5_password",
+                       placeholder="MT5 trading password") }}
+                    <div class="input-group-append">
+                        <span class="input-group-text">
+                            <i class="fa fa-eye" id="toggleMt5Password" type="button"></i>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{ mt5_form.submit(class="btn btn-success col-sm-4", id="mt5-submit") }}
+    </form>
+</div>
+{% endblock %}
+{% block jslinks %}
+<script src="{{url_for('static', filename='profile.js')}}"></script>
+<script>
+    // Toggle MT5 password visibility
+    document.getElementById('toggleMt5Password').addEventListener('click', function () {
+        var pwd = document.getElementById('mt5_password');
+        var icon = this;
+        if (pwd.type === 'password') {
+            pwd.type = 'text';
+            icon.classList.replace('fa-eye', 'fa-eye-slash');
+        } else {
+            pwd.type = 'password';
+            icon.classList.replace('fa-eye-slash', 'fa-eye');
+        }
+    });
+</script>
+{% endblock %}

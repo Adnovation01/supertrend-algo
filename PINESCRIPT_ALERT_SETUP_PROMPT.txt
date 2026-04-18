@@ -1,0 +1,292 @@
+================================================================================
+  PINESCRIPT ALERT SETUP PROMPT
+  For use with: Supertrend Algo — TradingView to MetaTrader 5 Bridge
+  How to use: Copy everything below the dashed line and paste it into Claude,
+              ChatGPT, or any AI assistant, followed by your Pine Script code.
+================================================================================
+
+------------ COPY FROM HERE ----------------------------------------------------
+
+I have a TradingView Pine Script strategy/indicator that I need to modify so it
+fires webhook alerts in a specific JSON format for my MetaTrader 5 trading bot.
+
+=== THE EXACT JSON FORMAT MY BOT REQUIRES ===
+
+Every alert must send this JSON structure as the alert message:
+
+For a LONG ENTRY:
+{
+  "secret": "REPLACE_WITH_YOUR_SECRET",
+  "ticker": "REPLACE_WITH_MT5_SYMBOL",
+  "volume": 0.01,
+  "magic": 1001,
+  "alert_message": "long entry"
+}
+
+For a LONG EXIT (stop loss):
+{
+  "secret": "REPLACE_WITH_YOUR_SECRET",
+  "ticker": "REPLACE_WITH_MT5_SYMBOL",
+  "volume": 0.01,
+  "magic": 1001,
+  "alert_message": "long exit SL"
+}
+
+For a LONG EXIT (take profit):
+{
+  "secret": "REPLACE_WITH_YOUR_SECRET",
+  "ticker": "REPLACE_WITH_MT5_SYMBOL",
+  "volume": 0.01,
+  "magic": 1001,
+  "alert_message": "long exit TP"
+}
+
+For a SHORT ENTRY:
+{
+  "secret": "REPLACE_WITH_YOUR_SECRET",
+  "ticker": "REPLACE_WITH_MT5_SYMBOL",
+  "volume": 0.01,
+  "magic": 1001,
+  "alert_message": "short entry"
+}
+
+For a SHORT EXIT (stop loss):
+{
+  "secret": "REPLACE_WITH_YOUR_SECRET",
+  "ticker": "REPLACE_WITH_MT5_SYMBOL",
+  "volume": 0.01,
+  "magic": 1001,
+  "alert_message": "short exit SL"
+}
+
+For a SHORT EXIT (take profit):
+{
+  "secret": "REPLACE_WITH_YOUR_SECRET",
+  "ticker": "REPLACE_WITH_MT5_SYMBOL",
+  "volume": 0.01,
+  "magic": 1001,
+  "alert_message": "short exit TP"
+}
+
+
+=== FIELD RULES — READ CAREFULLY ===
+
+"secret"
+  - This is a fixed string. Replace REPLACE_WITH_YOUR_SECRET with your actual
+    secret key shown on the Dashboard of the bot's web interface.
+  - It does NOT change per alert. It is always the same hardcoded string.
+  - Example: "secret": "aB3kR7mN2pQx"
+
+"ticker"
+  - This must be the EXACT symbol name as it appears in MetaTrader 5 for your
+    broker — NOT the TradingView symbol name.
+  - Do NOT use {{ticker}} — TradingView's ticker format does not match MT5.
+  - Hardcode the MT5 symbol name as a string.
+  - Examples by broker:
+      Exness Gold:   "XAUUSD" or "XAUUSDm"
+      Exness Oil:    "USOIL" or "USOILm"
+      Exness EURUSD: "EURUSD" or "EURUSDm"
+      FundingPips:   "XAUUSD", "EURUSD", "US30", "NAS100"
+      FundedNext:    "XAUUSD", "EURUSD", "GBPUSD"
+  - If unsure, open MT5, go to Market Watch, and copy the symbol name exactly.
+
+"volume"
+  - This is the LOT SIZE in MetaTrader 5 units.
+  - Minimum is 0.01 (one micro lot).
+  - Do NOT use {{strategy.order.contracts}} — that is TradingView's contract
+    count and has no relation to MT5 lot sizes.
+  - Use a Pine Script input so the user can change it easily:
+      volume_input = input.float(0.01, title="Lot Size", minval=0.01, step=0.01)
+  - Then use the variable in the alert message string.
+  - If you want a fixed lot size, hardcode it: "volume": 0.01
+
+"magic"
+  - This is a unique integer number that identifies this specific strategy.
+  - It must be the SAME number in both the entry alert and the exit alert so
+    the bot knows which position to close.
+  - Use a different magic number for each strategy you run. For example:
+      Strategy 1 (Supertrend): magic = 1001
+      Strategy 2 (EMA Cross):  magic = 2002
+      Strategy 3 (RSI):        magic = 3003
+  - Add it as a Pine Script input:
+      magic_input = input.int(1001, title="Magic Number")
+
+"alert_message"
+  - This is a fixed string describing the signal. Must follow these exact formats:
+      "long entry"     — open a buy position
+      "long exit"      — close a buy position (no reason)
+      "long exit SL"   — close a buy position, reason: stop loss
+      "long exit TP"   — close a buy position, reason: take profit
+      "long exit TRAIL"— close a buy position, reason: trailing stop
+      "short entry"    — open a sell position
+      "short exit"     — close a sell position (no reason)
+      "short exit SL"  — close a sell position, reason: stop loss
+      "short exit TP"  — close a sell position, reason: take profit
+  - The word after "exit" can be anything — it is just logged as the exit reason.
+  - The first word must be "long" or "short".
+  - The second word must be "entry" or "exit".
+
+
+=== HOW TO BUILD THE ALERT MESSAGE IN PINE SCRIPT ===
+
+The alert JSON must be built as a string using str.tostring() for any variables.
+Pine Script does not support direct variable interpolation in strings, so you
+must concatenate the parts manually.
+
+CORRECT way to include a variable (e.g. lot size input):
+
+  entry_msg = '{"secret":"' + my_secret + '","ticker":"' + mt5_symbol +
+              '","volume":' + str.tostring(volume_input) +
+              ',"magic":' + str.tostring(magic_input) +
+              ',"alert_message":"long entry"}'
+
+Or, if all values are hardcoded, a simple string works:
+
+  entry_msg = '{"secret":"aB3kR7mN2pQx","ticker":"XAUUSD","volume":0.01,"magic":1001,"alert_message":"long entry"}'
+
+
+=== HOW TO WIRE ALERTS IN PINE SCRIPT ===
+
+METHOD A — Using strategy.entry() and strategy.exit() alert_message parameter
+(Best for strategy scripts that already use strategy.entry/exit)
+
+Pine Script v5 allows passing an alert_message directly to order functions:
+
+  strategy.entry("Long", strategy.long, alert_message=long_entry_msg)
+  strategy.exit("Long Exit", from_entry="Long", stop=sl_price, limit=tp_price,
+                alert_message=long_exit_msg)
+  strategy.close("Long", alert_message=long_close_msg)
+
+Then when creating the alert in TradingView:
+  - Set the Message field to: {{strategy.order.alert_message}}
+  - This automatically uses whatever alert_message was passed to the order function
+
+METHOD B — Using alert() function calls
+(Best for indicator scripts that do not use strategy.entry/exit)
+
+  if long_condition
+      alert(long_entry_msg, alert.freq_once_per_bar_close)
+
+  if long_exit_condition
+      alert(long_exit_msg, alert.freq_once_per_bar_close)
+
+METHOD C — Using alertcondition() with separate conditions
+(Creates separate named alerts in TradingView — each needs its own webhook alert)
+
+  alertcondition(long_entry_condition,  title="Long Entry",  message=long_entry_msg)
+  alertcondition(long_exit_condition,   title="Long Exit",   message=long_exit_msg)
+  alertcondition(short_entry_condition, title="Short Entry", message=short_entry_msg)
+  alertcondition(short_exit_condition,  title="Short Exit",  message=short_exit_msg)
+
+For Method C, you must create a separate TradingView alert for each condition,
+each pointing to the same webhook URL.
+
+
+=== COMPLETE WORKING EXAMPLE TEMPLATE ===
+
+Here is a minimal Pine Script template showing the correct alert structure.
+Use this as a reference for how to add alerts to my existing code:
+
+//@version=5
+strategy("My Strategy with MT5 Alerts", overlay=true)
+
+// ── MT5 Alert Configuration ────────────────────────────────────────────────
+var string tv_secret    = input.string("REPLACE_WITH_YOUR_SECRET", title="TV Secret")
+var string mt5_symbol   = input.string("XAUUSD",  title="MT5 Symbol")
+var float  lot_size     = input.float(0.01, title="Lot Size", minval=0.01, step=0.01)
+var int    magic_number = input.int(1001, title="Magic Number", minval=1)
+
+// Build alert JSON strings
+long_entry_msg  = '{"secret":"' + tv_secret + '","ticker":"' + mt5_symbol + '","volume":' + str.tostring(lot_size) + ',"magic":' + str.tostring(magic_number) + ',"alert_message":"long entry"}'
+long_exit_sl    = '{"secret":"' + tv_secret + '","ticker":"' + mt5_symbol + '","volume":' + str.tostring(lot_size) + ',"magic":' + str.tostring(magic_number) + ',"alert_message":"long exit SL"}'
+long_exit_tp    = '{"secret":"' + tv_secret + '","ticker":"' + mt5_symbol + '","volume":' + str.tostring(lot_size) + ',"magic":' + str.tostring(magic_number) + ',"alert_message":"long exit TP"}'
+short_entry_msg = '{"secret":"' + tv_secret + '","ticker":"' + mt5_symbol + '","volume":' + str.tostring(lot_size) + ',"magic":' + str.tostring(magic_number) + ',"alert_message":"short entry"}'
+short_exit_sl   = '{"secret":"' + tv_secret + '","ticker":"' + mt5_symbol + '","volume":' + str.tostring(lot_size) + ',"magic":' + str.tostring(magic_number) + ',"alert_message":"short exit SL"}'
+short_exit_tp   = '{"secret":"' + tv_secret + '","ticker":"' + mt5_symbol + '","volume":' + str.tostring(lot_size) + ',"magic":' + str.tostring(magic_number) + ',"alert_message":"short exit TP"}'
+
+// ── Your strategy logic goes here ─────────────────────────────────────────
+// Replace these placeholder conditions with your actual signal logic
+long_signal  = ta.crossover(ta.ema(close, 9), ta.ema(close, 21))
+short_signal = ta.crossunder(ta.ema(close, 9), ta.ema(close, 21))
+
+// ── Place orders with alert messages ──────────────────────────────────────
+if long_signal
+    strategy.entry("Long", strategy.long, alert_message=long_entry_msg)
+
+if short_signal
+    strategy.entry("Short", strategy.short, alert_message=short_entry_msg)
+
+// Attach exit alerts (stop loss and take profit)
+strategy.exit("Long Exit", from_entry="Long",
+              stop=close * 0.99, limit=close * 1.02,
+              alert_message=long_exit_sl)   // SL fires this message
+
+strategy.exit("Short Exit", from_entry="Short",
+              stop=close * 1.01, limit=close * 0.98,
+              alert_message=short_exit_sl)  // SL fires this message
+
+// END OF TEMPLATE
+
+
+=== IMPORTANT NOTES TO TELL THE AI ===
+
+1. DO NOT replace the "secret", "ticker", "volume", "magic", "alert_message"
+   key names — they must stay exactly as written. Only values change.
+
+2. DO NOT use {{ticker}}, {{strategy.order.contracts}}, or any other TradingView
+   placeholder variables inside the JSON. These are unreliable in webhook messages
+   and the bot does not use them. Use Pine Script variables and str.tostring() instead.
+
+3. The JSON must be on a SINGLE LINE in the alert message — no line breaks inside
+   the JSON string itself.
+
+4. When using strategy.exit() with both stop loss and take profit, Pine Script
+   only allows ONE alert_message per exit order. A common pattern is to use the
+   stop loss message as the default and add a separate strategy.close() for
+   take profit with its own message.
+
+5. The "magic" number must be THE SAME in both the entry and the exit for the
+   bot to correctly identify and close that specific position.
+
+6. If running multiple strategies on the same chart or same symbol, give each
+   strategy a DIFFERENT magic number to prevent them from closing each other's
+   positions.
+
+
+=== WHAT TO ASK THE AI ===
+
+After pasting this prompt, paste your Pine Script code and say:
+
+  "Please modify this Pine Script to fire webhook alerts in the exact JSON
+   format described above. Add input fields for TV Secret, MT5 Symbol, Lot Size,
+   and Magic Number at the top. Wire all entry and exit conditions to fire the
+   correct alert messages using strategy.entry(), strategy.exit(), or alert()
+   as appropriate for this script. Keep all existing strategy logic unchanged —
+   only add the alert functionality."
+
+------------ END OF PROMPT ------------------------------------------------------
+
+================================================================================
+  QUICK REFERENCE — Copy-paste ready alert strings
+  (Replace values in CAPS with your own)
+================================================================================
+
+Long Entry:
+{"secret":"YOUR_SECRET","ticker":"YOUR_MT5_SYMBOL","volume":0.01,"magic":1001,"alert_message":"long entry"}
+
+Long Exit SL:
+{"secret":"YOUR_SECRET","ticker":"YOUR_MT5_SYMBOL","volume":0.01,"magic":1001,"alert_message":"long exit SL"}
+
+Long Exit TP:
+{"secret":"YOUR_SECRET","ticker":"YOUR_MT5_SYMBOL","volume":0.01,"magic":1001,"alert_message":"long exit TP"}
+
+Short Entry:
+{"secret":"YOUR_SECRET","ticker":"YOUR_MT5_SYMBOL","volume":0.01,"magic":1001,"alert_message":"short entry"}
+
+Short Exit SL:
+{"secret":"YOUR_SECRET","ticker":"YOUR_MT5_SYMBOL","volume":0.01,"magic":1001,"alert_message":"short exit SL"}
+
+Short Exit TP:
+{"secret":"YOUR_SECRET","ticker":"YOUR_MT5_SYMBOL","volume":0.01,"magic":1001,"alert_message":"short exit TP"}
+
+================================================================================
