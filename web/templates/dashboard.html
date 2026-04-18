@@ -80,7 +80,10 @@
 </div>
 {% endblock %}
 {% block navbartitle %}Dashboard{% endblock %}
-{% block navbarlinks %}{% endblock %}
+{% block navbarlinks %}
+<a class="nav-item nav-link active" href="/">Dashboard</a>
+<a class="nav-item nav-link" href="/trades">Trade Log</a>
+{% endblock %}
 {% block jslinks %}
 <script src="{{url_for('static', filename='dashboard.js')}}"></script>
 {% endblock %}

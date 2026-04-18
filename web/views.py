@@ -1,10 +1,10 @@
-from flask import Blueprint, render_template, flash
+from flask import Blueprint, render_template, flash, request
 from flask_login import login_required, current_user
 
 from utils.shared import shared_obj, lg, cy, ye, r, n
 from utils.mt5_manager import mt5_manager
 from web import db
-from .models import MT5Account, ProfileForm, MT5ApiForm
+from .models import MT5Account, ProfileForm, MT5ApiForm, Trade
 
 views = Blueprint('views', __name__)
 
@@ -123,6 +123,35 @@ def mt5_reconnect():
         user=current_user,
         profile_form=profile_form,
         mt5_form=mt5_form,
+    )
+
+
+@views.route('/trades', methods=['GET'])
+@login_required
+def trades():
+    page        = request.args.get('page', 1, type=int)
+    symbol      = request.args.get('symbol', '').strip()
+    direction   = request.args.get('direction', '').strip()
+    entry_exit  = request.args.get('entry_exit', '').strip()
+
+    query = Trade.query.filter_by(user_id=current_user.id)
+    if symbol:
+        query = query.filter(Trade.symbol.ilike(f'%{symbol}%'))
+    if direction:
+        query = query.filter(Trade.direction == direction)
+    if entry_exit:
+        query = query.filter(Trade.entry_exit == entry_exit)
+
+    pagination = query.order_by(Trade.datetime.desc()).paginate(page=page, per_page=25, error_out=False)
+
+    return render_template(
+        'trades.html',
+        user=current_user,
+        pagination=pagination,
+        trades=pagination.items,
+        symbol=symbol,
+        direction=direction,
+        entry_exit=entry_exit,
     )
 
 
