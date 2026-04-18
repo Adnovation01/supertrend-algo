@@ -1,7 +1,7 @@
 """
 Supertrend Algo — AI-Powered Health Monitor (Gemini)
 Runs every 5 minutes via Task Scheduler.
-Checks port 8501, task state, and app logs.
+Checks port 80, task state, and app logs.
 Unknown errors are diagnosed by Gemini, which generates and applies fixes.
 """
 import subprocess
@@ -18,7 +18,7 @@ load_dotenv(dotenv_path=r"C:\supertrend-algo\.env")
 LOG_FILE  = r"C:\supertrend-algo\logs\monitor.log"
 APP_DIR   = r"C:\supertrend-algo"
 TASK_NAME = "SupertrendAlgo"
-PORT      = 8501
+PORT      = 80
 PYTHON    = r"C:\Program Files\Python311\python.exe"
 
 # Known-fixable error signatures (handled locally, no AI needed)
@@ -255,7 +255,7 @@ def apply_known_fix(error_text: str) -> bool:
         return True
 
     if "address already in use" in error_text.lower() or "10048" in error_text:
-        log("Known fix: port in use — killing stale process on 8501", "FIX")
+        log("Known fix: port in use — killing stale process on 80", "FIX")
         subprocess.run(
             ["powershell.exe", "-Command",
              f"Get-NetTCPConnection -LocalPort {PORT} -ErrorAction SilentlyContinue | "

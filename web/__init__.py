@@ -11,7 +11,7 @@ bcrypt        = Bcrypt()
 socketio      = SocketIO(app)
 login_manager = LoginManager()
 
-APP_PORT = 8501
+APP_PORT = 80
 
 
 def create_app(load_user_mt5):
